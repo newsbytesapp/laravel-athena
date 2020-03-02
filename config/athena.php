@@ -28,9 +28,9 @@ $athenaConfiguration = [
 
     'bucket' => env('S3_BUCKET'),
 
-    'outputfolder' => env('ATHENA_OUTPUT_FOLDER'),
+    'output_folder' => env('ATHENA_OUTPUT_FOLDER'),
 ];
 
-$athenaConfiguration['s3output'] = 's3://' . $athenaConfiguration['bucket'] . '/' . $athenaConfiguration['outputfolder'];
+$athenaConfiguration['s3output'] = 's3://' . $athenaConfiguration['bucket'] . '/' . $athenaConfiguration['output_folder'];
 
 return $athenaConfiguration;

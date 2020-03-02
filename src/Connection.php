@@ -1,4 +1,5 @@
 <?php
+
 namespace Bilaliqbalr\Athena;
 
 use Aws\S3\S3Client;
@@ -6,25 +7,28 @@ use Exception;
 use Goodby\CSV\Import\Standard\Interpreter;
 use Goodby\CSV\Import\Standard\Lexer;
 use Goodby\CSV\Import\Standard\LexerConfig;
-use Illuminate\Database\MySqlConnection;
-use Illuminate\Database\QueryException;
+use Illuminate\Database\PostgresConnection;
 use Bilaliqbalr\Athena\Query\Grammar as QueryGrammar;
 use Bilaliqbalr\Athena\Query\Processor;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Config;
 use Bilaliqbalr\Athena\Schema\Builder;
 use Bilaliqbalr\Athena\Schema\Grammar as SchemaGrammar;
-use Bilaliqbalr\Athena\Schema\Grammar;
 use League\Flysystem\AwsS3v3\AwsS3Adapter;
 use League\Flysystem\Filesystem;
 
-class Connection extends MySqlConnection
+class Connection extends PostgresConnection
 {
 
     /**
      * @var \Aws\Athena\AthenaClient|null
      */
     protected $athenaClient = null;
+
+    /**
+     * @var \Aws\S3\S3Client
+     */
+    protected $s3Client = null;
 
     /**
      * Local file path downloaded from S3 in Athena response
@@ -41,6 +45,8 @@ class Connection extends MySqlConnection
         $this->tablePrefix = isset($this->config['prefix']) ? $this->config['prefix'] : '';
 
         $this->prepareAthenaClient();
+
+        $this->prepareS3Client();
 
         $this->useDefaultQueryGrammar();
 
@@ -108,17 +114,22 @@ class Connection extends MySqlConnection
         return $this->schemaGrammar;
     }
 
+    public function prepareS3client()
+    {
+        if (is_null($this->s3Client)) {
+            $this->s3Client = new S3Client([
+                'credentials' => $this->config['credentials'],
+                'region' => $this->config['region'],
+                'version' => $this->config['version'],
+            ]);
+        }
+    }
+
     function getS3Filesystem($bucket = '')
     {
-        $client = new S3Client([
-            'credentials' => $this->config['credentials'],
-            'region' => $this->config['region'],
-            'version' => $this->config['version'],
-        ]);
-        $adapter = new AwsS3Adapter($client, $bucket);
-        $disk = new Filesystem($adapter);
+        $adapter = new AwsS3Adapter($this->s3Client, $bucket);
 
-        return $disk;
+        return new Filesystem($adapter);
     }
 
     /**
@@ -193,7 +204,7 @@ class Connection extends MySqlConnection
         if (count($binding) > 0) {
             foreach ($binding as $oneBind) {
                 $from = '/' . preg_quote('?', '/') . '/';
-                $to = "'" . $oneBind . "'";
+                $to = is_numeric($oneBind) ? $oneBind : "'" . $oneBind . "'";
                 $query = preg_replace($from, $to, $query, 1);
             }
         }
@@ -255,6 +266,7 @@ class Connection extends MySqlConnection
         $response = $this->athenaClient->startQueryExecution($param_Query);
 
         if ($response) {
+            $executionResponse = [];
             $queryStatus = 'None';
             while ($queryStatus == 'None' or $queryStatus == 'RUNNING' or $queryStatus == 'QUEUED') {
                 $executionResponse = $this->athenaClient->getQueryExecution(['QueryExecutionId' => $response['QueryExecutionId']]);
@@ -308,9 +320,9 @@ class Connection extends MySqlConnection
     /**
      * Run a select statement against the database.
      *
-     * @param  string $query
-     * @param  array $bindings
-     * @param  bool $useReadPdo
+     * @param string $query
+     * @param array $bindings
+     * @param bool $useReadPdo
      *
      * @return array
      * @throws \Exception
@@ -325,12 +337,13 @@ class Connection extends MySqlConnection
         $start = microtime(true);
         if ($executionResponse = $this->executeQuery($query, $bindings)) {
             $S3OutputLocation = $executionResponse['QueryExecution']['ResultConfiguration']['OutputLocation'];
-            $s3FilePath = '/' . $this->config['outputfolder'] . '/' . basename($S3OutputLocation);
-            $localFilePath = public_path("report/" . basename($s3FilePath));
+            $s3FilePath = '/' . $this->config['output_folder'] . '/' . basename($S3OutputLocation);
+            $localFilePath = storage_path('exports/' . basename($s3FilePath));
 
             if ($this->downloadFileFromS3ToLocalServer($s3FilePath, $localFilePath)) {
                 $this->localFilePath = $localFilePath;
                 $result = $this->formatCSVFileQueryResults($this->localFilePath);
+                unlink($this->localFilePath);
             }
         }
         $this->logQuery(
@@ -340,4 +353,28 @@ class Connection extends MySqlConnection
         return $result;
     }
 
+    /**
+     * @param $query
+     * @param array $bindings
+     * @return string
+     * @throws Exception
+     */
+    public function export($query, $bindings = [])
+    {
+        if ($this->pretending()) {
+            return '';
+        }
+
+        $s3FilePath = '';
+        $start = microtime(true);
+        if ($executionResponse = $this->executeQuery($query, $bindings)) {
+            $S3OutputLocation = $executionResponse['QueryExecution']['ResultConfiguration']['OutputLocation'];
+            $s3FilePath = '/' . $this->config['output_folder'] . '/' . basename($S3OutputLocation);
+        }
+        $this->logQuery(
+            $query, [], $this->getElapsedTime($start)
+        );
+
+        return $s3FilePath;
+    }
 }
