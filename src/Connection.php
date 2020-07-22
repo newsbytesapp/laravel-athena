@@ -343,6 +343,7 @@ class Connection extends PostgresConnection
             if ($this->downloadFileFromS3ToLocalServer($s3FilePath, $localFilePath)) {
                 $this->localFilePath = $localFilePath;
                 $result = $this->formatCSVFileQueryResults($this->localFilePath);
+                unlink($this->localFilePath);
             }
         }
         $this->logQuery(
