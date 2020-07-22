@@ -343,23 +343,22 @@ class Connection extends PostgresConnection
             if ($this->downloadFileFromS3ToLocalServer($s3FilePath, $localFilePath)) {
                 $this->localFilePath = $localFilePath;
                 $result = $this->formatCSVFileQueryResults($this->localFilePath);
-                unlink($this->localFilePath);
             }
         }
         $this->logQuery(
             $query, [], $this->getElapsedTime($start)
         );
-
         return $result;
     }
 
     /**
      * @param $query
      * @param array $bindings
+     * @param bool $formLocal
      * @return string
      * @throws Exception
      */
-    public function export($query, $bindings = [])
+    public function export($query, $bindings = [], $formLocal = false): string 
     {
         if ($this->pretending()) {
             return '';
@@ -371,10 +370,24 @@ class Connection extends PostgresConnection
             $S3OutputLocation = $executionResponse['QueryExecution']['ResultConfiguration']['OutputLocation'];
             $s3FilePath = '/' . $this->config['output_folder'] . '/' . basename($S3OutputLocation);
         }
+        
         $this->logQuery(
             $query, [], $this->getElapsedTime($start)
         );
 
+        if ($formLocal) {
+            $localFilePath = storage_path('exports/' . basename($s3FilePath));
+
+            if ($this->downloadFileFromS3ToLocalServer($s3FilePath, $localFilePath)) {
+                return $localFilePath;
+            } else {
+                return '';
+            }
+        }
+
         return $s3FilePath;
     }
 }
+
+
+
