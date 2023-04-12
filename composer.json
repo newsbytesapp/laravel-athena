@@ -3,9 +3,9 @@
     "description": "Laravel athena query builder.",
     "type": "library",
     "require": {
-        "php": "^7.1",
+        "php": ">=7.1",
         "aws/aws-sdk-php": "^3.112",
-        "laravel/framework": "^5.7 || ^6.0",
+        "laravel/framework": ">=5.7",
         "league/flysystem-aws-s3-v3": "^1.0",
         "goodby/csv": "^1.3"
     },
